@@ -1,0 +1,266 @@
+import csv
+import json
+import math
+from datetime import datetime
+
+
+BASE_PRICES = {
+    "apartamento": 700.00,  
+    "casa": 900.00,         
+    "estudio": 1200.00      
+}
+
+CONTRACT_VALUE = 2000.00
+CONTRACT_MAX_INSTALLMENTS = 5
+
+ADDITIONAL = {
+    "apartamento_2_quartos": 200.00,
+    "casa_2_quartos": 250.00,
+    "vaga_apto_casa": 300.00,
+    "estudio_base_2_vagas": 250.00,
+    "estudio_vaga_extra": 60.00
+}
+
+APARTMENT_NO_CHILDREN_DISCOUNT = 0.05  
+
+
+
+def calcular_aluguel_mensal(tipo, num_quartos=1, vagas=0, possui_criancas=True):
+    tipo = tipo.lower()
+    if tipo not in BASE_PRICES:
+        raise ValueError("Tipo inválido. Deve ser 'apartamento', 'casa' ou 'estudio'.")
+
+    preco = float(BASE_PRICES[tipo])
+    detalhe = [f"Preço base ({tipo}): R$ {preco:,.2f}"]
+
+    
+    if tipo == "apartamento":
+        if num_quartos == 2:
+            preco += ADDITIONAL["apartamento_2_quartos"]
+            detalhe.append(f"+ 2 quartos (adicional): R$ {ADDITIONAL['apartamento_2_quartos']:,.2f}")
+        elif num_quartos > 2:
+            extra_quartos = num_quartos - 1
+            adicional = ADDITIONAL["apartamento_2_quartos"] * extra_quartos
+            preco += adicional
+            detalhe.append(f"+ {num_quartos} quartos (adicional por quarto): R$ {adicional:,.2f}")
+    elif tipo == "casa":
+        if num_quartos == 2:
+            preco += ADDITIONAL["casa_2_quartos"]
+            detalhe.append(f"+ 2 quartos (adicional): R$ {ADDITIONAL['casa_2_quartos']:,.2f}")
+        elif num_quartos > 2:
+            extra_quartos = num_quartos - 1
+            adicional = ADDITIONAL["casa_2_quartos"] * extra_quartos
+            preco += adicional
+            detalhe.append(f"+ {num_quartos} quartos (adicional por quarto): R$ {adicional:,.2f}")
+    elif tipo == "estudio":
+        pass
+
+    
+    if tipo in ("apartamento", "casa"):
+        if vagas > 0:
+            adicional_vagas = ADDITIONAL["vaga_apto_casa"] * vagas
+            preco += adicional_vagas
+            detalhe.append(f"+ {vagas} vaga(s) (R$ {ADDITIONAL['vaga_apto_casa']:,.2f} cada): R$ {adicional_vagas:,.2f}")
+    elif tipo == "estudio":
+        if vagas > 0:
+            if vagas >= 2:
+                preco += ADDITIONAL["estudio_base_2_vagas"]
+                detalhe.append(f"+ pacote 2 vagas (R$ {ADDITIONAL['estudio_base_2_vagas']:,.2f})")
+                vagas_extras = vagas - 2
+                if vagas_extras > 0:
+                    adicional_extras = ADDITIONAL["estudio_vaga_extra"] * vagas_extras
+                    preco += adicional_extras
+                    detalhe.append(f"+ {vagas_extras} vaga(s) extra (R$ {ADDITIONAL['estudio_vaga_extra']:,.2f} cada): R$ {adicional_extras:,.2f}")
+            else:
+                
+                preco_por_vaga = ADDITIONAL["estudio_base_2_vagas"] / 2.0
+                preco += preco_por_vaga
+                detalhe.append(f"+ 1 vaga (proporcional do pacote 2 vagas): R$ {preco_por_vaga:,.2f}")
+
+    
+    desconto = 0.0
+    if tipo == "apartamento" and (not possui_criancas):
+        desconto = preco * APARTMENT_NO_CHILDREN_DISCOUNT
+        preco -= desconto
+        detalhe.append(f"- Desconto 5% por não possuir crianças: R$ {desconto:,.2f}")
+
+    valor_total = round(preco, 2)
+
+    return {
+        "tipo": tipo,
+        "num_quartos": (num_quartos if tipo != "estudio" else None),
+        "vagas": vagas,
+        "possui_criancas": possui_criancas,
+        "detalhe": detalhe,
+        "valor_mensal": valor_total
+    }
+
+
+def parcelar_contrato(valor=CONTRACT_VALUE, parcelas=1):
+    if parcelas < 1:
+        raise ValueError("Parcelas deve ser >= 1")
+    if parcelas > CONTRACT_MAX_INSTALLMENTS:
+        raise ValueError(f"Parcelas máximas permitidas: {CONTRACT_MAX_INSTALLMENTS}")
+
+    parcela_base = math.floor((valor / parcelas) * 100) / 100.0
+    parcelas_list = [parcela_base] * parcelas
+    soma = parcela_base * parcelas
+    diferenca = round(valor - soma, 2)
+    parcelas_list[-1] = round(parcelas_list[-1] + diferenca, 2)
+    return parcelas_list
+
+
+def gerar_planilha_12_meses(filepath, orcamento, contrato_parcelas=1, separador=';'):
+    parcelas_contrato = parcelar_contrato(CONTRACT_VALUE, contrato_parcelas)
+    rows = []
+    for mes in range(1, 13):
+        if mes <= len(parcelas_contrato):
+            parcela = parcelas_contrato[mes - 1]
+        else:
+            parcela = 0.0
+        aluguel = orcamento["valor_mensal"]
+        total = round(aluguel + parcela, 2)
+        rows.append({
+            "mes": mes,
+            "aluguel_mensal": f"{aluguel:.2f}",
+            "parcela_contrato": f"{parcela:.2f}",
+            "total_mes": f"{total:.2f}"
+        })
+
+    
+    fieldnames = ["mes", "aluguel_mensal", "parcela_contrato", "total_mes"]
+    with open(filepath, mode='w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter=separador)
+        writer.writeheader()
+        for r in rows:
+            writer.writerow(r)
+    return rows
+
+
+
+def ler_inteiro(prompt, minimo=None, maximo=None, default=None):
+    while True:
+        raw = input(prompt).strip()
+        if raw == "" and default is not None:
+            return default
+        try:
+            val = int(raw)
+        except ValueError:
+            print("Entrada inválida. Digite um número inteiro.")
+            continue
+        if minimo is not None and val < minimo:
+            print(f"Valor deve ser >= {minimo}.")
+            continue
+        if maximo is not None and val > maximo:
+            print(f"Valor deve ser <= {maximo}.")
+            continue
+        return val
+
+
+def ler_bool(prompt, default=None):
+    while True:
+        raw = input(prompt).strip().lower()
+        if raw == "" and default is not None:
+            return default
+        if raw in ("s", "sim", "y", "yes"):
+            return True
+        if raw in ("n", "nao", "não", "no"):
+            return False
+        print("Resposta inválida. Digite 's' (sim) ou 'n' (não).")
+
+
+def mostrar_orcamento(orc):
+    print("\n--- ORÇAMENTO ---")
+    print(f"Tipo: {orc['tipo'].capitalize()}")
+    if orc["num_quartos"] is not None:
+        print(f"Quartos: {orc['num_quartos']}")
+    print(f"Vagas solicitadas: {orc['vagas']}")
+    print(f"Possui crianças: {'Sim' if orc['possui_criancas'] else 'Não'}")
+    print("Detalhamento:")
+    for d in orc["detalhe"]:
+        print("  ", d)
+    print(f"Valor do aluguel mensal orçado: R$ {orc['valor_mensal']:,.2f}")
+
+
+
+def main():
+    print("=== R.M Imobiliária — Gerador de Orçamento de Aluguel (CLI) ===")
+    
+    tipos_validos = list(BASE_PRICES.keys())
+    print("Tipos disponíveis:")
+    for i, t in enumerate(tipos_validos, start=1):
+        print(f"  {i}. {t.capitalize()} (R$ {BASE_PRICES[t]:,.2f})")
+    escolha = ler_inteiro(f"Escolha o tipo (1-{len(tipos_validos)}): ", minimo=1, maximo=len(tipos_validos))
+    tipo = tipos_validos[escolha - 1]
+
+    num_quartos = 1
+    if tipo != "estudio":
+        num_quartos = ler_inteiro("Número de quartos (inteiro, mínimo 1): ", minimo=1, default=1)
+
+    vagas = ler_inteiro("Quantidade de vagas de garagem (0 se não quiser): ", minimo=0, default=0)
+
+    possui_criancas = True
+    if tipo == "apartamento":
+        possui_criancas = ler_bool("Cliente possui crianças? (s/n) [padrão: s]: ", default=True)
+    else:
+        
+        possui_criancas = ler_bool("Considerar que há crianças no grupo? (s/n) [padrão: s]: ", default=True)
+
+    
+    orc = calcular_aluguel_mensal(tipo=tipo, num_quartos=num_quartos, vagas=vagas, possui_criancas=possui_criancas)
+    mostrar_orcamento(orc)
+
+    
+    print(f"\nContrato imobiliário: R$ {CONTRACT_VALUE:,.2f} — pode ser parcelado em até {CONTRACT_MAX_INSTALLMENTS}x.")
+    parcelas = ler_inteiro(f"Quantas parcelas para o contrato? (1-{CONTRACT_MAX_INSTALLMENTS}) [padrão 1]: ",
+                           minimo=1, maximo=CONTRACT_MAX_INSTALLMENTS, default=1)
+    parcelas_list = parcelar_contrato(CONTRACT_VALUE, parcelas)
+    print(f"Parcelas do contrato escolhidas ({parcelas}x):")
+    for i, p in enumerate(parcelas_list, start=1):
+        print(f"  Parcela {i}: R$ {p:,.2f}")
+
+    
+    primeiro_mes_total = orc["valor_mensal"] + parcelas_list[0] if parcelas >= 1 else orc["valor_mensal"]
+    print(f"\nExemplo: Mês 1 total (aluguel + 1ª parcela do contrato): R$ {primeiro_mes_total:,.2f}")
+
+    
+    gerar_csv = ler_bool("Deseja gerar arquivo .csv com as 12 parcelas do orçamento? (s/n) [padrão: s]: ", default=True)
+    if gerar_csv:
+        default_name = f"orcamento_{tipo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        path = input(f"Informe o nome do arquivo para salvar (padrão: {default_name}): ").strip()
+        if path == "":
+            path = default_name
+        try:
+            gerar_planilha_12_meses(path, orcamento=orc, contrato_parcelas=parcelas, separador=';')
+            print(f"CSV gerado com sucesso: {path}")
+        except Exception as e:
+            print("Erro ao gerar CSV:", e)
+
+    
+    salvar_json = ler_bool("Deseja salvar um resumo em .json com o orçamento? (s/n) [padrão: s]: ", default=True)
+    if salvar_json:
+        default_json = f"orcamento_resumo_{tipo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        path_json = input(f"Nome do arquivo JSON (padrão: {default_json}): ").strip()
+        if path_json == "":
+            path_json = default_json
+        resumo = {
+            "timestamp": datetime.now().isoformat(),
+            "orcamento": orc,
+            "contrato": {
+                "valor_total": CONTRACT_VALUE,
+                "parcelas": parcelas_list
+            }
+        }
+        try:
+            with open(path_json, 'w', encoding='utf-8') as f:
+                json.dump(resumo, f, ensure_ascii=False, indent=2)
+            print(f"Resumo salvo em: {path_json}")
+        except Exception as e:
+            print("Erro ao salvar JSON:", e)
+
+    print("\nProcesso finalizado. Obrigado — R.M Imobiliária CLI.")
+
+if __name__ == "__main__":
+    main()
+
+    
